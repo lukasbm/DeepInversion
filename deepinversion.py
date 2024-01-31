@@ -78,6 +78,7 @@ class DeepInversionFeatureHook:
 
 def get_image_prior_losses(inputs_jit):
     # COMPUTE total variation regularization loss
+    # the difference will only by in the first and last entry of the specified dimension, everything else will be 0
     diff1 = inputs_jit[:, :, :, :-1] - inputs_jit[:, :, :, 1:]
     diff2 = inputs_jit[:, :, :-1, :] - inputs_jit[:, :, 1:, :]
     diff3 = inputs_jit[:, :, 1:, :-1] - inputs_jit[:, :, :-1, 1:]
@@ -127,7 +128,6 @@ class DeepInversionClass(object):
             0 - will run low resolution optimization for 1k and then full resolution for 1k;
             1 - will run optimization on high resolution for 2k
             2 - will run optimization on high resolution for 20k
-
         :param jitter: amount of random shift applied to image at every iteration
         :param coefficients: dictionary with parameters and coefficients for optimization.
             keys:
@@ -143,8 +143,8 @@ class DeepInversionClass(object):
         """
 
         print("Deep inversion class generation")
-        # for reproducibility
-        torch.manual_seed(torch.cuda.current_device())
+        # FIXME: for reproducibility
+        # torch.manual_seed(torch.cuda.current_device())
 
         self.net_teacher = net_teacher
 
@@ -191,7 +191,7 @@ class DeepInversionClass(object):
         prefix = path
         self.prefix = prefix
 
-        local_rank = torch.cuda.current_device()
+        local_rank = torch.cuda.current_device() if torch.cuda.is_available() else 0
         if local_rank == 0:
             create_folder(prefix)
             create_folder(prefix + "/best_images/")
@@ -219,7 +219,7 @@ class DeepInversionClass(object):
         save_every = self.save_every
 
         kl_loss = nn.KLDivLoss(reduction="batchmean").cuda()
-        local_rank = torch.cuda.current_device()
+        local_rank = torch.cuda.current_device() if torch.cuda.is_available() else 0
         best_cost = 1e4
         criterion = self.criterion
 
@@ -228,7 +228,7 @@ class DeepInversionClass(object):
             # only works for classification now, for other tasks need to provide target vector
             targets = torch.LongTensor(
                 [random.randint(0, 999) for _ in range(self.bs)]
-            ).to("cuda")
+            ).to("cuda" if torch.cuda.is_available() else "cpu")
             if not self.random_label:
                 # preselected classes, good for ResNet50v1.5
                 targets = [
@@ -277,7 +277,7 @@ class DeepInversionClass(object):
                 ]
 
                 targets = torch.LongTensor(targets * (int(self.bs / len(targets)))).to(
-                    "cuda"
+                    "cuda" if torch.cuda.is_available() else "cpu"
                 )
 
         img_original = self.image_resolution
@@ -286,7 +286,7 @@ class DeepInversionClass(object):
         inputs = torch.randn(
             (self.bs, 3, img_original, img_original),
             requires_grad=True,
-            device="cuda",
+            device="cuda" if torch.cuda.is_available() else "cpu",
             dtype=data_type,
         )
         pooling_function = nn.modules.pooling.AvgPool2d(kernel_size=2)
@@ -495,22 +495,17 @@ class DeepInversionClass(object):
             pil_image.save(place_to_store)
 
     def generate_batch(self, net_student=None, targets=None):
-        # for ADI detach student and add put to eval mode
-        net_teacher = self.net_teacher
-
-        use_fp16 = self.use_fp16
-
         # fix net_student
-        if not (net_student is None):
+        if net_student is not None:
             net_student = net_student.eval()
 
         if targets is not None:
             targets = torch.from_numpy(np.array(targets).squeeze()).cuda()
-            if use_fp16:
+            if self.use_fp16:
                 targets = targets.half()
 
         self.get_images(net_student=net_student, targets=targets)
 
-        net_teacher.eval()
+        self.net_teacher.eval()
 
         self.num_generations += 1
