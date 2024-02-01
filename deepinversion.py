@@ -297,7 +297,7 @@ class DeepInversionClass(object):
             skipfirst = True
 
         iteration = 0
-        for lr_it, lower_res in enumerate([2, 1]):
+        for lr_it, lower_res in enumerate([2, 1]):  # (0,2), (1,1)
             if lr_it == 0:
                 iterations_per_layer = 2000
             else:
@@ -334,6 +334,7 @@ class DeepInversionClass(object):
 
             lr_scheduler = lr_cosine_policy(self.lr, 100, iterations_per_layer)
 
+            # start iterative process
             for iteration_loc in range(iterations_per_layer):
                 iteration += 1
                 # learning rate scheduling
@@ -388,25 +389,21 @@ class DeepInversionClass(object):
                         outputs_student = net_student(inputs_jit)
 
                     T = 3.0
-                    if 1:
-                        T = 3.0
-                        # Jensen Shanon divergence:
-                        # another way to force KL between negative probabilities
-                        P = nn.functional.softmax(outputs_student / T, dim=1)
-                        Q = nn.functional.softmax(outputs / T, dim=1)
-                        M = 0.5 * (P + Q)
+                    # Jensen Shanon divergence:
+                    # another way to force KL between negative probabilities
+                    P = nn.functional.softmax(outputs_student / T, dim=1)
+                    Q = nn.functional.softmax(outputs / T, dim=1)
+                    M = 0.5 * (P + Q)
 
-                        P = torch.clamp(P, 0.01, 0.99)
-                        Q = torch.clamp(Q, 0.01, 0.99)
-                        M = torch.clamp(M, 0.01, 0.99)
-                        eps = 0.0
-                        loss_verifier_cig = 0.5 * kl_loss(
-                            torch.log(P + eps), M
-                        ) + 0.5 * kl_loss(torch.log(Q + eps), M)
-                        # JS criteria - 0 means full correlation, 1 - means completely different
-                        loss_verifier_cig = 1.0 - torch.clamp(
-                            loss_verifier_cig, 0.0, 1.0
-                        )
+                    P = torch.clamp(P, 0.01, 0.99)
+                    Q = torch.clamp(Q, 0.01, 0.99)
+                    M = torch.clamp(M, 0.01, 0.99)
+                    eps = 0.0
+                    loss_verifier_cig = 0.5 * kl_loss(
+                        torch.log(P + eps), M
+                    ) + 0.5 * kl_loss(torch.log(Q + eps), M)
+                    # JS criteria - 0 means full correlation, 1 - means completely different
+                    loss_verifier_cig = 1.0 - torch.clamp(loss_verifier_cig, 0.0, 1.0)
 
                     if local_rank == 0:
                         if iteration % save_every == 0:
